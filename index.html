@@ -216,7 +216,7 @@ kable(data.frame(stack = confusionMatrix(stackPred, predDF$classe)$overall[1]))<
 </tr>
 </tbody>
 </table>
-<p>Indeed, the stacked model correctly predicts nearly every observation in the testing set. However, it may be guilty of overfitting, so I tested with the volidation set.</p>
+<p>Indeed, the stacked model correctly predicts nearly every observation in the testing set. However, it may be guilty of overfitting, so I tested with the validation set.</p>
 <pre class="r"><code>vpred1 &lt;- predict(modelFit1, validationFB)
 vpred2 &lt;- predict(modelFit2, validationFB, n.trees = 100, type = &quot;response&quot;)
 vpred3 &lt;- predict(modelFit3, validationFB)

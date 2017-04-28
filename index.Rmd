@@ -96,7 +96,7 @@ kable(data.frame(stack = confusionMatrix(stackPred, predDF$classe)$overall[1]))
 
 ```
 
-Indeed, the stacked model correctly predicts nearly every observation in the testing set. However, it may be guilty of overfitting, so I tested with the volidation set.
+Indeed, the stacked model correctly predicts nearly every observation in the testing set. However, it may be guilty of overfitting, so I tested with the validation set.
 
 ```{r stack predict, cache = TRUE}
 
