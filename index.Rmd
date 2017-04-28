@@ -1,0 +1,142 @@
+---
+title: "Predicting Quality in Performance of Weight Lifting Exercises"
+author: "Joseph Scheidt"
+date: "April 27, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(caret)
+library(randomForest)
+library(gbm)
+library(knitr)
+
+```
+
+##Synopsis
+
+This analysis attempts to build a predictive model that can be used to provide feedback on how well a particular weight lifting exercise was performed (in this case, the Unilateral Dumbbell Biceps Curl). After testing a few model variants, a random forest model proved to be the best predictor tested, with an estimated out-of-sample accuracy of 99.3 percent.
+
+##Data
+
+Six participants were asked to perform biceps curls in five ways, one way according to specification and the other four with common mistakes. Data were collected from accelerometers on the belt, forearm, arm, and dumbell.
+
+More information on the study is here:
+http://groupware.les.inf.puc-rio.br/har
+
+The data are divided into training and testing sets, and each consist of 159 variables, including subject name, time stamp, and window number. The variable we are attempting to predict is the classe variable, which has five values: A, B, C, D, and E, with A being the correct execution of the exercise. The training set has 19622 observations.
+
+##Data Analysis
+
+First, I downloaded the data and partitioned the training data set into training, test, and validation subsets to build a predictive model. Next, I examined the training subset of the data. Several variables consist mostly of missing data, and are observed only when a new window is begun. Therefore, I removed these variables, as well as id variables, before building the model.
+
+```{r data, cache = TRUE}
+
+trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(trainURL, "training.csv")
+download.file(testURL, "testing.csv")
+
+fitbit <- read.csv("training.csv", row.names = 1)
+
+set.seed(5381542)
+inBuild <- createDataPartition(y = fitbit$classe, p = 0.7, list = FALSE)
+validationFB <- fitbit[-inBuild,]; buildData <- fitbit[inBuild,]
+
+inTrain <- createDataPartition(y = buildData$classe, p = 0.7, list = FALSE)
+trainFB <- buildData[inTrain,]; testFB <- buildData[-inTrain,]
+
+
+trainFB <- trainFB[,c(7:10, 36:48, 59:67, 83:85, 101, 112:123, 139, 150:159)]
+
+```
+
+##Prediction Models
+
+Given that the variable we are attempting to predict is already descriptive of either the correct execution of the exercise or of the mistake the subject is making, interpretability is not as important as accuracy for this prediction model. It is very important that a subject using this model to evaluate his or her performance get accurate feedback, as performing these exercises incorrectly leads to a greater chance of injury. With that in mind, I attempted three prediction models on the data: a random forest, a generalized boosting model, and a linear discriminant analysis. The gbm model will use 10-fold cross validation and the lda model will use leave-one-out cross validation. The random forest model calculates the out-of-bag error rate internally, so cross validation is unneccessary.
+
+```{r prediction models, cache = TRUE, message = FALSE}
+
+modelFit1 <- randomForest(classe ~ ., data = trainFB, prox = FALSE)
+predictions1 <- predict(modelFit1, testFB, type = "class")
+
+modelFit2 <- gbm(classe ~ ., data = trainFB, distribution = "multinomial", 
+                 n.trees = 100, verbose = FALSE, interaction.depth = 12)
+
+##gbm models return a probability matrix for each class      
+predMatrix2 <- predict(modelFit2, testFB, n.trees = 100, type = "response")
+predictions2 <- colnames(predMatrix2)[apply(predMatrix2, 1, which.max)]
+
+modelFit3 <- train(classe ~ ., data = trainFB, method = "lda")
+predictions3 <- predict(modelFit3, testFB)
+
+kable(data.frame(
+randomForest = confusionMatrix(predictions1, testFB$classe)$overall[1],
+gbm = confusionMatrix(predictions2, testFB$classe)$overall[1],
+lda = confusionMatrix(predictions3, testFB$classe)$overall[1]
+))
+```
+
+The random forest model is by far the most accurate. Next, I tried a model stack, to see if it would improve the accuracy over the random forest model alone.
+
+```{r model stack, cache = TRUE}
+
+predDF <- data.frame(p1 = predictions1, p2 = predMatrix2, p3 = predictions3,
+                     classe = testFB$classe)
+
+modelStack <- randomForest(classe ~ ., data = predDF, prox = FALSE)
+
+stackPred <- predict(modelStack, predDF)
+kable(data.frame(stack = confusionMatrix(stackPred, predDF$classe)$overall[1]))
+
+```
+
+Indeed, the stacked model correctly predicts nearly every observation in the testing set. However, it may be guilty of overfitting, so I tested with the volidation set.
+
+```{r stack predict, cache = TRUE}
+
+vpred1 <- predict(modelFit1, validationFB)
+vpred2 <- predict(modelFit2, validationFB, n.trees = 100, type = "response")
+vpred3 <- predict(modelFit3, validationFB)
+
+predVDF <- data.frame(p1 = vpred1, p2 = vpred2, p3 = vpred3)
+
+vstackPred <- predict(modelStack, predVDF)
+
+kable(data.frame(
+stack = confusionMatrix(vstackPred, validationFB$classe)$overall[1],
+randomForest = confusionMatrix(vpred1, validationFB$classe)$overall[1]
+))
+
+```
+
+The stacked model slightly overfit the testing data set, making it less accurate than the random forest model alone on the validation set. Given that the model stacking has not proved useful in this case, the best option seems to be to combine the training and testing subsets to build a random forest model, which should slightly increase the accuracy versus the random forest model built only on the training subset.
+
+```{r final random forest model, cache = TRUE}
+
+buildData <- buildData[,c(7:10, 36:48, 59:67, 83:85, 101, 112:123, 139, 150:159)]
+
+modelFit4 <- randomForest(classe ~ ., data = buildData, prox = FALSE)
+predictions4 <- predict(modelFit4, validationFB)
+
+kable(data.frame(
+    initial.randomForest = confusionMatrix(vpred1, validationFB$classe)$overall[1],
+    final.randomForest = confusionMatrix(predictions4,
+                                         validationFB$classe)$overall[1]                                       
+))
+
+```
+
+Adding the testing subset data to the random forest model did appear to increase the accuracy of the model slightly. However, given that I ran three models on the validation subset, I expect this accuracy to be a slight overestimate on the true accuracy of the model. On the other hand, the random forest model performed very well and very consistently in each test phase. In all, it does seem fairly safe to estimate the accuracy of the final model as about 0.993.
+
+##Conclusion
+Given the high accuracy of the model, this could be used to implement feedback for the quality of exercise for new subjects. I would highly recommend, however, that further testing of the model's accuracy be performed during rollout, in conjunction with experienced weight lifters observing new subjects, to make certain the model continues to perform as expected. The inherent danger in incorrectly classifying exercises with mistakes as conforming to standards necessitates this caution.
+
+##Citation
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Many thanks to the above authors for generously making their data available publicly for testing and analysis.
